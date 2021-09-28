@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+qc_outputs
+report.html
+report.Rmd
+report_git.Rmd
+report_git.html*
+*.pdf
+*.zip
+NAPPY_DCM.Rproj
+
