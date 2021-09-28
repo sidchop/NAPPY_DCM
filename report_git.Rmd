@@ -1,0 +1,699 @@
+---
+output: html_document
+---
+
+#  NAPPY - Post-processing Quality Control {.tabset}
+
+## Read Me \
+
+This document can take upto 2 min to fully load. **Please wait** until nine "tabs" have appeared above this sentence before exploring the document. \
+
+***
+This document outlines the quality of rs-fmri data after processing, as well as derivatives such as the functional connectivity values. In addition to quality control (QC), it evaluates the impact of several denoising strategies for multi-echo data. The 6 pipelines compared are:
+
+```{r, echo=FALSE}
+library(DiagrammeR)
+DiagrammeR("graph LR;
+    A(fmriprep)",height = '100%')
+
+```
+
+```{r, echo=FALSE}
+library(DiagrammeR)
+DiagrammeR("graph LR;
+    A(fmriprep)-->B(tedana)", height = '100%')
+
+```
+
+```{r, echo=FALSE}
+library(DiagrammeR)
+DiagrammeR("graph LR;
+    A(fmriprep)-->B(tedana);
+    B-->C(2P + HMP + HPF + DT )", height = '100%')
+
+```
+
+```{r, echo=FALSE}
+library(DiagrammeR)
+DiagrammeR("graph LR;
+    A(fmriprep)-->B(tedana);
+    B-->C(AROMA);
+    C-->D(2P + HMP + HPF + DT)", height = '100%')
+
+```
+
+```{r, echo=FALSE}
+library(DiagrammeR)
+DiagrammeR("graph LR;
+    A(fmriprep)-->B(tedana);
+    B-->C(2P + HMP);
+    C-->D(GSR);
+    D-->D(HPF + DT", height = '100%')
+
+```
+
+```{r, echo=FALSE}
+library(DiagrammeR)
+DiagrammeR("graph LR;
+    A(fmriprep)-->B(tedana);
+    B-->C(2P + HMP); 
+    C-->D(AROMA) ;
+    D-->E(GSR);
+    E-->F(HPF + DT", height = '100%')
+
+```
+
+**Legend:** \
+
+ * *fmriprep* = standardized minimal pre-processing steps (e.g. slice-time correction and registration to MNI). Also produced a optimally combined image from the 4 echos. \
+ 
+ * *tedana* = a multi-echo ICA based denosing method. Inputs are minimally procssed echos from fmriprep. Also produces a optimally combined echo. \
+ 
+ * *AROMA* = a automated ICA based denosiing technique. Focuses on headmotion. \
+ 
+ * *2P* = the two physilogical singals which are regressed out (mean white matter and csv signal). These are extraced from a tight mask. \
+ 
+ * *HMP* = 6 headmotion parameters (x,z,y, rot/trans). Regressed out. \
+ 
+ * *HPF* = High pass-filtering (fsl) \
+ 
+ * *DT* = Detrending \
+ 
+ * *GSR* = Global signal regression. Regressed out. \
+ 
+
+**Caveats:** \
+
+ * Except for tedana and HPF, all other denoising steps were carried out in one regression, to avoid reintroducing noise. \
+ 
+  * AROMA was implemented non-aggressively (regressing out noise components, while controlling for signal components)
+ 
+***
+
+#### For guide on how to interpret the quality metrics in this document, please see our [lab manual's fMRI QC page](https://www.evernote.com/shard/s331/sh/92fa5e70-5792-fc08-0684-d17ed23cb763/3a01855b454ef7669e48bc929d7b0dd1). You will need a evernote account. Or you can see the [PDF version here](https://www.dropbox.com/s/tv3iyifkj5gpqwy/rs-FMRIFCprocessingandQC.pdf?dl=0). 
+ 
+***
+
+#### Authors:  \
+
+Sidhant Chopra \
+
+Tribikram Thapa \
+
+Winnie Orchard  \
+
+***
+
+## 1. Headmotion exclusion   \
+Headmotion was approximated using Framewise Displacement (FD). Recent studies have shown that multiband datasets with high temporal resolution like the HCP contain additional respiratory artifacts that manifest in the six realignment parameters typically used to calculate summary statistics of head motion (Agrawal et al., 2020; Fair et al., 2020; Power et al., 2019). To mitigate this effect, we downsampled the FD traces and applied bandpass filtering on realignment parameter between 0.2 and 0.5 Hz. Below is a distribution of mean FD vales (in mm) in the NAPPY dataset:
+
+```{r, out.width="60%", out.height="60%", echo = FALSE}
+knitr::include_graphics("qc_outputs/mean_fd_dist.png")
+```
+
+Criteria from [Parkes et al., (2019)](https://www.sciencedirect.com/science/article/pii/S1053811917310972) was applied. A `1` in any column means that the scan for this subject met this exclusion criteria, and could be excluded from further analyses. The default leniaint exclusion criteria was set to mean FD > `.55 mm`. The default stringent exclusion criteria is set to: (i) mean FD > `.25 mm` AND/OR (ii) >20% of FD values > `.20 mm`, AND/OR (iii) any FD values > `5 mm`.
+
+\
+
+```{r, echo=FALSE, message=FALSE}
+library(kableExtra)
+fdtable <- read.table("qc_outputs/fd_exclude.txt")
+fdtable %>%
+  kbl(caption = "1 = Exclusion criteria met") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+**Conclusion:** This is relatively low head motion in this dataset. If lenient criteria are used, no subjects need be excluded. If stringent criteria are used, exclude `sub-114` and `sub-208`.
+
+##  2. Excluding ROIS with low/poor signal
+
+The atlas used was a combination 3 parcellations schemes: \
+
+ * Cortex: Schaefer 2018, 300 regions/7 networks \
+ 
+ * Subcortex: Tian 2020, 32 regions \
+ 
+ * Cerebellum: Buckner 2011, 7 region/networks \
+ 
+ Method: [Brown et al. 2019, Neuron](https://www.sciencedirect.com/science/article/abs/pii/S0896627319307433?via%3Dihub) (See supplement)\
+
+Regions were screened for insufficient fMRI BOLD signal intensity by first calculating each region’s mean BOLD signal across the all scans. The regional BOLD intensity values were then sorted from largest to smallest, and  the 'elbow' (or largest drop in singal) of this distribution using the pairwise differences was identified:  \
+
+```{r, out.width = "500px", echo=FALSE}
+knitr::include_graphics("qc_outputs/low_singal_ROIs.png")
+```
+\
+
+**Conclusion:** The following regions could be excluded due to low signal:
+
+```{r, echo=FALSE, message=FALSE}
+library(kableExtra)
+fdtable <- read.table("qc_outputs/low_singal_ROIs.txt", header = F)
+fdtable %>%
+  kbl() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+**NOTE:** This method does not identify regions that had poor coverage due to limited field of view (FOV). Visual inspection of scans showed that the cerebellum was cut-off in many subjects. If the cerebellum is to be included in analyses, more rigorous quantification of FOV issues should be conducted. 
+
+
+## 3. Carpet plots
+
+The visualization of all voxel time series as a carpet plot (or grayplot), is a very useful tool in detecting and understanding artifacts and hence evaluating noise-correction techniques. The carpet plot is a heatmap visualization of the voxel x time matrix, X (V x T for V voxels and T time points), usually after z-scoring each voxel time series (rows of X), resulting in the normalized matrix used here ([Aquino et al., 2020](http://dx.doi.org/10.1016/j.neuroimage.2020.116614)). Here, we calculated carpet plots for each pre-processing method to ensure that signal deflections and dropout were reduced. Historically, voxels in carpet plots are ordered somewhat arbitrarily, thus we used both random-ordering and global-singal, which reorders voxels according to strength of correlation to global signal ([learn more](https://bmhlab.github.io/DiCER_results/)).
+
+
+### Random Ordering  \
+#### fmriprep 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName1"> Show/Hide
+ </button>  
+<div id="BlockName1" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/fmriprep/", 
+                    full.names = TRUE,
+                    pattern = "*random*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName1"> Hide
+<div id="BlockName1" class="collapse">  
+ </button>  
+</div>
+
+
+#### fmriprep + tedana 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName2"> Show/Hide
+ </button>  
+<div id="BlockName2" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana/", 
+                    full.names = TRUE,
+                    pattern = "*random*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName2"> Hide
+<div id="BlockName2" class="collapse">  
+ </button>  
+</div>
+
+#### fmriprep + tedana + 2P + HMP + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName3"> Show/Hide
+ </button>  
+<div id="BlockName3" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana_2P_HMP_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = "*random*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName3"> Hide
+<div id="BlockName3" class="collapse">  
+ </button>  
+</div>
+
+
+#### fmriprep + tedana + AROMA +  2P + HMP + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName4"> Show/Hide
+ </button>  
+<div id="BlockName4" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana_2P_HMP_AROMA_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = "*random*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName4"> Hide
+<div id="BlockName4" class="collapse">  
+ </button>  
+</div>
+
+
+
+#### fmriprep + tedana +  2P + HMP + **GSR** + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName5"> Show/Hide
+ </button>  
+<div id="BlockName5" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana_2P_HMP_GSR_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = "*random*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName5"> Hide
+<div id="BlockName5" class="collapse">  
+ </button>  
+</div>
+
+#### fmriprep + tedana +  2P + HMP + AROMA + **GSR** + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName6"> Show/Hide
+ </button>  
+<div id="BlockName6" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana_2P_HMP_AROMA_GSR_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = "*random*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName6"> Hide
+<div id="BlockName6" class="collapse">  
+ </button>  
+</div>
+
+\
+
+### Global Signal Ordering  \
+#### fmriprep 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName7"> Show/Hide
+ </button>  
+<div id="BlockName7" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/fmriprep/", 
+                    full.names = TRUE,
+                    pattern = "*gs_ordering*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName7"> Hide
+<div id="BlockName7" class="collapse">  
+ </button>  
+</div>
+
+\
+
+#### fmriprep + tedana 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName8"> Show/Hide
+ </button>  
+<div id="BlockName8" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana/", 
+                    full.names = TRUE,
+                    pattern = "*gs_ordering*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName8"> Hide
+<div id="BlockName8" class="collapse">  
+ </button>  
+</div>
+
+#### fmriprep + tedana + 2P + HMP + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName9"> Show/Hide
+ </button>  
+<div id="BlockName9" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana_2P_HMP_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = "*gs_ordering*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName9"> Hide
+<div id="BlockName9" class="collapse">  
+ </button>  
+</div>
+
+
+#### fmriprep + tedana + AROMA +  2P + HMP + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName10"> Show/Hide
+ </button>  
+<div id="BlockName10" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana_2P_HMP_AROMA_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = "*gs_ordering*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName10"> Hide
+<div id="BlockName10" class="collapse">  
+ </button>  
+</div>
+
+
+
+#### fmriprep + tedana +  2P + HMP + GSR + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName11"> Show/Hide
+ </button>  
+<div id="BlockName11" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana_2P_HMP_GSR_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = "*gs_ordering*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName11"> Hide
+<div id="BlockName11" class="collapse">  
+ </button>  
+</div>
+
+#### fmriprep + tedana +  2P + HMP + AROMA + GSR + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName12"> Show/Hide
+ </button>  
+<div id="BlockName12" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/carpetplots/tedana_2P_HMP_AROMA_GSR_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = "*gs*")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName12"> Hide
+<div id="BlockName12" class="collapse">  
+ </button>  
+</div>
+
+\
+
+***
+
+**Conclusion:** Carpetplots show a lots of potential noise before denoising procedures (i.e. after fmriprep). Tedana does a great job in cleaning up noise. 2P + HMP + HPF + DT further reduces potential noise. The way we have implemented AROMA reintroduces noise. So, the cleanest pipeline seems to be fmriprep + tedana +  2P + HMP + HPF + DT, although the same pipeline with GSR is also okay. \
+
+Three subjects (`sub-143`, `sub-207`, `sub-237`) have horizontal lines (clusters of voxels) of consistently low signal. As the carpet plots were made using a very rough mask of the brain, and the voxels are not ordered by tissue type (gm,wm,csf), it is difficult to know if these clusters are in gray matter or not. As the fd values and connectivity matrices for these subjects looks fine, they do not need to be excluded at this stage - but a closer look at these subjects in the follwing checks is warrented. 
+
+
+## 4. Group-level Functional Connectivity Matricies
+
+ROIs are sorted by: Left cortical, right cortical, left subcortical, right subcortical, cerebellum. 
+
+Mean Functional Connectivity Matrix (across whole sample), for each processing type:
+
+#### fmriprep \
+
+```{r, out.width="40%", out.height="40%", echo=FALSE}
+knitr::include_graphics("qc_outputs/mean_conmat_fmriprep.png", ) 
+                          
+                          
+```
+
+#### fmriprep + tedana \
+
+```{r, out.width="40%", out.height="40%", echo=FALSE}
+knitr::include_graphics("qc_outputs/mean_conmat_fmriprep_tedana.png") 
+                          
+```
+
+#### fmriprep + tedana + 2P + HMP + HPF + DT  \
+
+```{r, out.width="40%", out.height="40%", echo=FALSE}
+knitr::include_graphics("qc_outputs/mean_conmat_fmriprep_tedana_2P_HMP_HPF_DT.png") 
+
+```
+
+#### fmriprep + tedana + AROMA +  2P + HMP + HPF + DT  \
+
+```{r, out.width="40%", out.height="40%", echo=FALSE}
+knitr::include_graphics("qc_outputs/mean_conmat_fmriprep_tedana_2P_HMP_AROMA_HPF_DT.png") 
+
+```
+
+#### fmriprep + tedana + 2P + HMP + **GSR** + HPF + DT \
+
+```{r, out.width="40%", out.height="40%", echo=FALSE}
+knitr::include_graphics("qc_outputs/mean_conmat_fmriprep_tedana_2P_HMP_GSR_HPF_DT.png") 
+
+```
+
+#### fmriprep + tedana + AROMA + 2P + HMP + **GSR** + HPF + DT \
+
+
+```{r, out.width="40%", out.height="40%", echo=FALSE}
+knitr::include_graphics("qc_outputs/mean_conmat_fmriprep_tedana_2P_HMP_AROMA_GSR_HPF_DT.png") 
+
+```
+
+## 5. Subject-level Functional Connectivity Matricies
+
+#### fmriprep 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName13"> Show/Hide
+ </button>  
+<div id="BlockName13" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/conplots/fmriprep/", 
+                    full.names = TRUE,
+                    pattern = ".png")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName13"> Hide
+<div id="BlockName13" class="collapse">  
+ </button>  
+</div>
+
+#### fmriprep + tedena
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName14"> Show/Hide
+ </button>  
+<div id="BlockName14" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/conplots/tedana/", 
+                    full.names = TRUE,
+                    pattern = ".png")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName14"> Hide
+<div id="BlockName14" class="collapse">  
+ </button>  
+</div>
+
+
+#### fmriprep + tedana + 2P + HMP + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName15"> Show/Hide
+ </button>  
+<div id="BlockName15" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/conplots/tedana_2P_HMP_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = ".png")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName15"> Hide
+<div id="BlockName15" class="collapse">  
+ </button>  
+</div>
+
+#### fmriprep + tedana + AROMA +  2P + HMP + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName16"> Show/Hide
+ </button>  
+<div id="BlockName16" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/conplots/tedana_2P_HMP_AROMA_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = ".png")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName16"> Hide
+<div id="BlockName16" class="collapse">  
+ </button>  
+</div>
+
+#### fmriprep + tedana + 2P + HMP + **GSR** + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName17"> Show/Hide
+ </button>  
+<div id="BlockName17" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/conplots/tedana_2P_HMP_GSR_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = ".png")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName17"> Hide
+<div id="BlockName17" class="collapse">  
+ </button>  
+</div>
+
+
+#### fmriprep + tedana + AROMA + 2P + HMP + **GSR** + HPF + DT 
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName18"> Show/Hide
+ </button>  
+<div id="BlockName18" class="collapse">  
+```{r, echo=FALSE,out.width="25%", out.height="25%",fig.show='hold', echo=FALSE}
+plots <- list.files("qc_outputs/conplots/tedana_2P_HMP_AROMA_GSR_HPF_DT/", 
+                    full.names = TRUE,
+                    pattern = ".png")
+knitr::include_graphics(plots)
+```
+<button class="btn btn-primary" data-toggle="collapse" data-target="#BlockName18"> Hide
+<div id="BlockName18" class="collapse">  
+ </button>  
+</div>
+
+
+***
+
+**Conclusion:** `sub-236` has lots of zeros in its timeseries, and upon examination of the image, `fmriprep` had done a extremely poor registration - exclude subject. 
+
+
+## 6. FD-FC correlations 
+
+#### Correlation plots between FC at each edge and mean FD (mFD): 
+
+```{r, out.width="40%", out.height="40%", echo=FALSE}
+knitr::include_graphics(c("qc_outputs/fd_fc/fd_fc_fmriprep.png",
+                          "qc_outputs/fd_fc/fd_fc_fmriprep_tedana.png",
+                            "qc_outputs/fd_fc/fd_fc_fmriprep_tedana_2P_HMP_HPF_DT.png",
+                          "qc_outputs/fd_fc/fd_fc_fmriprep_tedana_2P_HMP_AROMA_HPF_DT.png",
+                          "qc_outputs/fd_fc/fd_fc_fmriprep_tedana_2P_HMP_GSR_HPF_DT.png",
+                          "qc_outputs/fd_fc/fd_fc_fmriprep_tedana_2P_HMP_AROMA_GSR_HPF_DT.png"))
+```
+
+\
+
+#### Distribution of above (FC-FD correlations): 
+
+```{r, out.width="100%", out.height="100%", echo=FALSE}
+library(tiff)
+library(grid)
+img <- readTIFF("qc_outputs/fd_fc/fd_fc_boxplots.tiff")
+ grid.raster(img)
+```
+
+## 7. FD-FC-Distance correlations 
+
+Correlation between FC-mFD correlation and pairwise euclidean distances between centroids of each ROI pair. These plots assess the dependence of QC-FC correlations on the distance between brain regions (movement typically has a more pronounced effect on the QC-FC correlation for short-range connectivity):
+
+```{r, out.width="50%", out.height="50%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/fd_fc/fmriprep_fd_fc_distance.tiff"))
+
+```
+
+```{r, out.width="50%", out.height="50%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/fd_fc/fmriprep_tedana_fd_fc_distance.tiff"))
+```
+```{r, out.width="50%", out.height="50%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/fd_fc/fmriprep_tedana_2P_HMP_HPF_DT_fd_fc_distance.tiff"))
+```
+
+```{r, out.width="50%", out.height="50%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/fd_fc/fmriprep_tedana_2P_HMP_AROMA_HPF_DT_fd_fc_distance.tiff"))
+```
+
+```{r, out.width="50%", out.height="50%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/fd_fc/fmriprep_tedana_2P_HMP_GSR_HPF_DT_fd_fc_distance.tiff"))
+```
+```{r, out.width="50%", out.height="50%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/fd_fc/fmriprep_tedana_2P_HMP_AROMA_GSR_HPF_DT_fd_fc_distance.tiff"))
+```
+
+\
+
+**Conclusion:** All denoising steps except those which include AROMA improve (flatten) FD-FC - distance relationship. 
+
+
+## 8. Subject to subject FC correlations
+
+Looking the the correlation of FC values between all subjects can indicate problematic subjects. It can also be useful to compare the effect different processing pipelines have homogeneity of FC values between subjects. 
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_plot.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_plot.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_2P_HMP_HPF_DT_plot.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_2P_HMP_AROMA_HPF_DT_plot.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_2P_HMP_GSR_HPF_DT_plot.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_2P_HMP_AROMA_GSR_HPF_DT_plot.tiff"))
+```
+
+#### Below I have plotted distribution of mean correlations between a subject, and all other subject (row mean of the above plots): 
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_mean_cor_dist.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_mean_cor_dist.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_2P_HMP_HPF_DT_mean_cor_dist.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_2P_HMP_AROMA_HPF_DT_mean_cor_dist.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_2P_HMP_GSR_HPF_DT_mean_cor_dist.tiff"))
+```
+
+```{r, out.width="80%", out.height="80%", echo=FALSE}
+library(tiff)
+library(grid)
+grid.raster(readTIFF("qc_outputs/sub2sub/fmriprep_tedana_2P_HMP_AROMA_GSR_HPF_DT_mean_cor_dist.tiff"))
+```
+
+\
+
+**Conclusion:** Tedana and 2P+HMP+HPF+DT and GSR increases homogeneity of FC vales between subjects. After Tedana + 2P+ HMP + HPF + DT ± GSR, there are no clear outlier subjects. 
+
+
+## 9. Conclusions:
+
+
+ * This is relatively low head motion in this dataset. If lenient criteria are used, no subjects need be excluded. If stringent criteria are used, exclude `sub-114` and `sub-208`. \
+
+* In addition to the cerebellum, following regions could be excluded due to low signal: \
+
+```{r, echo=FALSE, message=FALSE}
+library(kableExtra)
+fdtable <- read.table("qc_outputs/low_singal_ROIs.txt", header = F)
+fdtable %>%
+  kbl() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+ * As expecte, carpetplots show a lots of potential noise before denoising procedures (i.e. after fmriprep). Tedana does a great job in cleaning up noise. 2P + HMP + HPF + DT, further reduces potential noise. The way we have implemented AROMA reintroduces noise. So, the cleanest pipeline seems to be fmriprep + tedana +  2P + HMP  + HPF + DT, plus or minus GSR.  \
+
+ * `sub-236` has lots of zeros in its timeseries, and upon examination of the image, `fmriprep` had done a extremely poor registraion - best to exclude subject. \
+
+ * As expected, functional connectivity matrices show a lots of potential noise before denoising procedures (i.e. after fmriprep). Tedana does a good job in cleaning up noise in some scans and not in other. 2P + HMP + HPF + DT further reduces potential noise. GSR induces negative correlations. AROMA was re-introduced noise in most subjects.
+ 
+ * All denoisiing pipelines (post fmriprep) reduce correlations between headmotion and connectivity (FD-FC). The best preforming pipeline is fmriprep + tedana + 2P + HMP +  HPF + DT ± GSR. \
+ 
+ * All denoising pipelines except those which include AROMA improve (flatten) FD-FC - distance relationship. \
+
+ * Tedana and 2P+HMP+HPF+DT increases homogeneity of FC vales between subjects. After Tedana + 2P + HMP + HPF + DT ± GSR, there are no clear outlier subjects. 
+ 
+### Recomentaions: \
+
+ * Based on connectivity matrices, carpet plots and FD-FC metrics, fmriprep + tedana + 2P + HMP + HPF + DT ± GSR is the superior denoising pipeline. \
+ 
+ * Subjects that must be excluded are: `sub-236`. If a lenient QC approach is taken, no futher subjects need be excluded. \
+ 

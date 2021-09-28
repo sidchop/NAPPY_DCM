@@ -5,7 +5,6 @@
 qc_outputs
 report.html
 report.Rmd
-report_git.Rmd
 report_git.html*
 *.pdf
 *.zip
