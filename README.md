@@ -19,7 +19,8 @@ The following piplines are compared (please see report for more details on imple
 <center>
   <img src="readme_pipelines.png" width="80%" />
 </center>
-  ------------------------------------------------------------------------
+
+------------------------------------------------------------------------
 
 ## Questions
 
