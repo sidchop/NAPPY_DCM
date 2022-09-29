@@ -7,7 +7,7 @@ Orchard, E, R., Voigt, K., Chopra, S., Rana, T., Ward, P., Egan, G., Jamadar,S. 
 
 ------------------------------------------------------------------------
 
-This repo contains a quality control report for  Multi-echo+Multi-band (MB/ME)resting-state fMRI data from the Neual Adaptations in the Post-Partum Year (NAPPY) project (40 first-time mothers at one-year postpartum and 39 age- and education-matched women who have never been pregnant). Rendered HTML report of data quality can be downloaded [here](https://www.dl.dropboxusercontent.com/s/dn4yz1c94bl7vj8/report_git.html?dl=0). This document is ~700mb can take up to 2 min to fully load. **Please wait** until nine "tabs" have appeared at the top of the report exploring the document.
+This repo contains a quality control report for  Multi-echo+Multi-band (MB+ME) resting-state fMRI data from the Neual Adaptations in the Post-Partum Year (NAPPY) project (40 first-time mothers at one-year postpartum and 39 age- and education-matched women who have never been pregnant). Rendered HTML report of data quality can be downloaded [here](https://www.dl.dropboxusercontent.com/s/dn4yz1c94bl7vj8/report_git.html?dl=0). This document is ~700mb can take up to 2 min to fully load. **Please wait** until nine "tabs" have appeared at the top of the report exploring the document.
 
 The report compares multiple processing pipelines on the following metrics:
 <center>
@@ -18,11 +18,9 @@ The following piplines are compared (please see report for more details on imple
 <center>
   <img src="readme_pipelines.png" width="80%" />
 </center>
-------------------------------------------------------------------------
 
 ## [Download Report](https://www.dl.dropboxusercontent.com/s/dn4yz1c94bl7vj8/report_git.html?dl=0)
 
-------------------------------------------------------------------------
 ## Questions
 
 
