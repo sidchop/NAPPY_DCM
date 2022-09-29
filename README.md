@@ -23,5 +23,5 @@ The following piplines are compared (please see report for more details on imple
 
 ## Questions
 
-Please contact me (Sidhant Chopra) as <sidhant.chopra@yale.edu> and/or
+Please contact me (Sidhant Chopra) at <sidhant.chopra@yale.edu> and/or
 <sidhant.chopra4@gmail.com>
